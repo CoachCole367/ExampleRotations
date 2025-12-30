@@ -59,29 +59,6 @@ public sealed class BLU_Basic : BlueMageRotation
     private IReadOnlyList<string> _missingSpells = Array.Empty<string>();
     private string _missingSpellStatus = "Missing spells: none";
 
-    #region Tracking Properties
-    public override void DisplayStatus()
-    {
-        RefreshMissingSpells();
-        var gatingActive = StopIfMissingSpells && _missingSpells.Count > 0;
-
-        ImGui.TextColored(ImGuiColors.DalamudViolet, "Blue Mage Rotation Tracking:");
-        ImGui.Text($"Profile: {Profile}");
-        ImGui.Text($"Use offensive oGCDs: {UseOffensiveOgcds}");
-        ImGui.Text($"Use defensive oGCDs: {UseDefensiveOgcds}");
-        ImGui.Text($"Stop if missing spells: {StopIfMissingSpells}");
-        ImGui.Text($"AoE target threshold: {AoeTargetThreshold}");
-
-        ImGui.TextColored(_missingSpells.Count > 0 ? ImGuiColors.DalamudRed : ImGuiColors.ParsedGreen, _missingSpellStatus);
-
-        ImGui.TextColored(gatingActive ? ImGuiColors.DalamudRed : ImGuiColors.ParsedGreen,
-            $"Gating active: {gatingActive}");
-
-        ImGui.TextColored(ImGuiColors.DalamudViolet, "Base Tracking:");
-        base.DisplayStatus();
-    }
-    #endregion
-
     private IReadOnlyList<(ActionID Id, string Name)> GetRequiredActionsForProfile()
     {
         return Profile switch
@@ -96,11 +73,14 @@ public sealed class BLU_Basic : BlueMageRotation
         return ActionHelper.TryGetAction(id, out var action) && action.IsUnlock;
     }
 
-    protected override IEnumerable<ActionID> ActiveActions => GetRequiredActionsForProfile().Select(req => req.Id);
+    protected override IBaseAction[] ActiveActions => GetRequiredActionsForProfile()
+        .Select(req => ActionHelper.TryGetAction(req.Id, out var action) ? action : null)
+        .OfType<IBaseAction>()
+        .ToArray();
 
-    private static bool IsValidCombatTarget(out Character? target)
+    private static bool IsValidCombatTarget(out IBattleChara? target)
     {
-        target = Svc.Targets.Target as Character;
+        target = Svc.Targets.Target as IBattleChara;
 
         if (target is null || !target.IsTargetable || target.IsDead)
         {
@@ -121,9 +101,9 @@ public sealed class BLU_Basic : BlueMageRotation
         return Vector3.Distance(player.Position, target.Position) <= DefaultSpellRange;
     }
 
-    private static int CountEnemiesInRange(Character center, float radius)
+    private static int CountEnemiesInRange(IBattleChara center, float radius)
     {
-        return Svc.Objects.Count(obj => obj is Character enemy
+        return Svc.Objects.Count(obj => obj is IBattleChara enemy
             && enemy.ObjectKind == ObjectKind.BattleNpc
             && enemy is IBattleNpc battleNpc
             && battleNpc.BattleNpcSubKind == BattleNpcSubKind.Enemy
@@ -146,7 +126,7 @@ public sealed class BLU_Basic : BlueMageRotation
         return false;
     }
 
-    private static bool TryGetReadySpell(ActionID actionId, Character target, out IAction? action)
+    private static bool TryGetReadySpell(ActionID actionId, IBattleChara target, out IAction? action)
     {
         if (!TryGetReadyAction(actionId, out var candidate))
         {
