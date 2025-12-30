@@ -47,22 +47,6 @@ public sealed class WHM_Example : WhiteMageRotation
     }
     #endregion
 
-    #region Tracking Properties
-    public override void DisplayStatus()
-    {
-        ImGui.TextColored(ImGuiColors.DalamudViolet, "Rotation Tracking:");
-        ImGui.Text($"BoolExample: {BoolExample}");
-        ImGui.Text($"PixelExample: {PixelExample}");
-        ImGui.Text($"TimeExample: {TimeExample}");
-        ImGui.Text($"DistanceExample: {DistanceExample}");
-        ImGui.Text($"PercentageExample: {PercentageExample}");
-        ImGui.Text($"FloatValueExample: {FloatValueExample}");
-        ImGui.Text($"Examplemultioptionconfigset: {Examplemultioptionconfigset}");
-        ImGui.TextColored(ImGuiColors.DalamudViolet, "Base Tracking:");
-        base.DisplayStatus();
-    }
-    #endregion
-
     #region Countdown Logic
     protected override IAction? CountDownAction(float remainTime)
     {
