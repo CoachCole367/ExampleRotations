@@ -1,4 +1,8 @@
+using Dalamud.Game.ClientState.Conditions;
+using Dalamud.Game.ClientState.Objects.Enums;
+using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.Interface.Colors;
+using ECommons.DalamudServices;
 using System.ComponentModel;
 
 namespace ExampleRotations.BlueMage;
@@ -49,6 +53,9 @@ public sealed class BLU_Basic : BlueMageRotation
         (ActionID.MakeSpell(11418), "Surpanakha"),
     };
 
+    private const float DefaultSpellRange = 25f;
+    private const float DefaultAoeRadius = 8f;
+
     private IReadOnlyList<string> _missingSpells = Array.Empty<string>();
     private string _missingSpellStatus = "Missing spells: none";
 
@@ -87,6 +94,85 @@ public sealed class BLU_Basic : BlueMageRotation
     private bool HasSpell(ActionID id)
     {
         return ActionHelper.TryGetAction(id, out var action) && action.IsUnlock;
+    }
+
+    private static bool IsValidCombatTarget(out BattleChara? target)
+    {
+        target = Svc.Targets.Target as BattleChara;
+
+        if (target is null || !target.IsTargetable || target.IsDead)
+        {
+            return false;
+        }
+
+        if (!Svc.Condition[ConditionFlag.InCombat])
+        {
+            return false;
+        }
+
+        var player = Svc.ClientState.LocalPlayer;
+        if (player is null)
+        {
+            return false;
+        }
+
+        return Vector3.Distance(player.Position, target.Position) <= DefaultSpellRange;
+    }
+
+    private static int CountEnemiesInRange(GameObject center, float radius)
+    {
+        return Svc.Objects.Count(obj => obj is BattleChara enemy
+            && enemy.ObjectKind == ObjectKind.BattleNpc
+            && enemy is IBattleNpc battleNpc
+            && battleNpc.BattleNpcSubKind == BattleNpcSubKind.Enemy
+            && enemy.IsTargetable
+            && !enemy.IsDead
+            && Vector3.Distance(center.Position, enemy.Position) <= radius);
+    }
+
+    private static bool TryGetReadyAction(ActionID actionId, out IAction? action)
+    {
+        if (ActionHelper.TryGetAction(actionId, out var candidate)
+            && candidate.IsUnlock
+            && candidate.IsReady)
+        {
+            action = candidate;
+            return true;
+        }
+
+        action = null;
+        return false;
+    }
+
+    private static bool TryGetReadySpell(ActionID actionId, BattleChara target, out IAction? action)
+    {
+        if (!TryGetReadyAction(actionId, out var candidate))
+        {
+            action = null;
+            return false;
+        }
+
+        var player = Svc.ClientState.LocalPlayer;
+        if (player is null)
+        {
+            action = null;
+            return false;
+        }
+
+        if (Vector3.Distance(player.Position, target.Position) > DefaultSpellRange)
+        {
+            action = null;
+            return false;
+        }
+
+        action = candidate;
+        return true;
+    }
+
+    private static bool CanWeaveNow()
+    {
+        var player = Svc.ClientState.LocalPlayer;
+        return player is not null && !player.IsCasting;
     }
 
     private void RefreshMissingSpells()
@@ -137,16 +223,70 @@ public sealed class BLU_Basic : BlueMageRotation
             return act != null;
         }
 
+        if (!IsValidCombatTarget(out _))
+        {
+            act = null;
+            return false;
+        }
+
+        if (UseOffensiveOgcds && CanWeaveNow())
+        {
+            if (TryGetReadyAction(ActionID.MakeSpell(11430), out act))
+            {
+                return true;
+            }
+        }
+
+        if (UseDefensiveOgcds && CanWeaveNow())
+        {
+            if (TryGetReadyAction(ActionID.MakeSpell(11390), out act))
+            {
+                return true;
+            }
+        }
+
         return base.GeneralAbility(nextGCD, out act);
     }
 
     protected override bool GeneralGCD(out IAction? act)
     {
+        if (!IsValidCombatTarget(out var target))
+        {
+            act = null;
+            return false;
+        }
+
         if (ShouldStopForMissingSpells(out act))
         {
             return act != null;
         }
 
-        return base.GeneralGCD(out act);
+        var aoeTargetCount = CountEnemiesInRange(target, DefaultAoeRadius);
+
+        if (Profile == BluProfile.AoE_Basic && aoeTargetCount >= AoeTargetThreshold)
+        {
+            if (TryGetReadySpell(ActionID.MakeSpell(11404), target, out act))
+            {
+                return true;
+            }
+
+            if (TryGetReadySpell(ActionID.MakeSpell(11418), target, out act))
+            {
+                return true;
+            }
+        }
+
+        if (TryGetReadySpell(ActionID.MakeSpell(11433), target, out act))
+        {
+            return true;
+        }
+
+        if (TryGetReadySpell(ActionID.MakeSpell(11385), target, out act))
+        {
+            return true;
+        }
+
+        act = null;
+        return false;
     }
 }
