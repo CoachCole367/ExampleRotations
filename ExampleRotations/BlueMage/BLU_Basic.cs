@@ -96,9 +96,11 @@ public sealed class BLU_Basic : BlueMageRotation
         return ActionHelper.TryGetAction(id, out var action) && action.IsUnlock;
     }
 
-    private static bool IsValidCombatTarget(out BattleChara? target)
+    protected override IEnumerable<ActionID> ActiveActions => GetRequiredActionsForProfile().Select(req => req.Id);
+
+    private static bool IsValidCombatTarget(out Character? target)
     {
-        target = Svc.Targets.Target as BattleChara;
+        target = Svc.Targets.Target as Character;
 
         if (target is null || !target.IsTargetable || target.IsDead)
         {
@@ -119,9 +121,9 @@ public sealed class BLU_Basic : BlueMageRotation
         return Vector3.Distance(player.Position, target.Position) <= DefaultSpellRange;
     }
 
-    private static int CountEnemiesInRange(GameObject center, float radius)
+    private static int CountEnemiesInRange(Character center, float radius)
     {
-        return Svc.Objects.Count(obj => obj is BattleChara enemy
+        return Svc.Objects.Count(obj => obj is Character enemy
             && enemy.ObjectKind == ObjectKind.BattleNpc
             && enemy is IBattleNpc battleNpc
             && battleNpc.BattleNpcSubKind == BattleNpcSubKind.Enemy
@@ -144,7 +146,7 @@ public sealed class BLU_Basic : BlueMageRotation
         return false;
     }
 
-    private static bool TryGetReadySpell(ActionID actionId, BattleChara target, out IAction? action)
+    private static bool TryGetReadySpell(ActionID actionId, Character target, out IAction? action)
     {
         if (!TryGetReadyAction(actionId, out var candidate))
         {
