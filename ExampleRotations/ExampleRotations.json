@@ -9,7 +9,7 @@
     "Dalamud",
     "Rotations"
   ],
-  "AssemblyVersion": "7.2.5.0",
+  "AssemblyVersion": "1.0.0.0",
   "DalamudApiLevel": 12,
   "LoadPriority": 0
 }
