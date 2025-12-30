@@ -35,11 +35,28 @@ public sealed class BLU_Basic : BlueMageRotation
     }
     #endregion
 
+    private static readonly IReadOnlyList<(ActionID Id, string Name)> SingleTargetRequiredActions = new List<(ActionID Id, string Name)>
+    {
+        (ActionID.MakeSpell(11385), "Water Cannon"),
+        (ActionID.MakeSpell(11433), "Sonic Boom"),
+        (ActionID.MakeSpell(11430), "Moon Flute"),
+    };
+
+    private static readonly IReadOnlyList<(ActionID Id, string Name)> AoeRequiredActions = new List<(ActionID Id, string Name)>
+    {
+        (ActionID.MakeSpell(11385), "Water Cannon"),
+        (ActionID.MakeSpell(11404), "Flamethrower"),
+        (ActionID.MakeSpell(11418), "Surpanakha"),
+    };
+
+    private IReadOnlyList<string> _missingSpells = Array.Empty<string>();
+    private string _missingSpellStatus = "Missing spells: none";
+
     #region Tracking Properties
     public override void DisplayStatus()
     {
-        var missingSpells = GetMissingSpells();
-        var gatingActive = StopIfMissingSpells && missingSpells.Count > 0;
+        RefreshMissingSpells();
+        var gatingActive = StopIfMissingSpells && _missingSpells.Count > 0;
 
         ImGui.TextColored(ImGuiColors.DalamudViolet, "Blue Mage Rotation Tracking:");
         ImGui.Text($"Profile: {Profile}");
@@ -48,14 +65,7 @@ public sealed class BLU_Basic : BlueMageRotation
         ImGui.Text($"Stop if missing spells: {StopIfMissingSpells}");
         ImGui.Text($"AoE target threshold: {AoeTargetThreshold}");
 
-        if (missingSpells.Count > 0)
-        {
-            ImGui.TextColored(ImGuiColors.DalamudRed, $"Missing spells: {string.Join(", ", missingSpells)}");
-        }
-        else
-        {
-            ImGui.TextColored(ImGuiColors.ParsedGreen, "Missing spells: none");
-        }
+        ImGui.TextColored(_missingSpells.Count > 0 ? ImGuiColors.DalamudRed : ImGuiColors.ParsedGreen, _missingSpellStatus);
 
         ImGui.TextColored(gatingActive ? ImGuiColors.DalamudRed : ImGuiColors.ParsedGreen,
             $"Gating active: {gatingActive}");
@@ -65,10 +75,78 @@ public sealed class BLU_Basic : BlueMageRotation
     }
     #endregion
 
-    private IReadOnlyList<string> GetMissingSpells()
+    private IReadOnlyList<(ActionID Id, string Name)> GetRequiredActionsForProfile()
     {
-        // Placeholder for future spell checks. This keeps the tracking UI consistent while
-        // avoiding hard dependencies on specific spell data in the example rotation.
-        return Array.Empty<string>();
+        return Profile switch
+        {
+            BluProfile.AoE_Basic => AoeRequiredActions,
+            _ => SingleTargetRequiredActions,
+        };
+    }
+
+    private bool HasSpell(ActionID id)
+    {
+        return ActionHelper.TryGetAction(id, out var action) && action.IsUnlock;
+    }
+
+    private void RefreshMissingSpells()
+    {
+        var required = GetRequiredActionsForProfile();
+        _missingSpells = required
+            .Where(req => !HasSpell(req.Id))
+            .Select(req => req.Name)
+            .ToList();
+
+        _missingSpellStatus = _missingSpells.Count > 0
+            ? $"Missing spells: {string.Join(", ", _missingSpells)}"
+            : "Missing spells: none";
+    }
+
+    private bool ShouldStopForMissingSpells(out IAction? act)
+    {
+        RefreshMissingSpells();
+
+        if (_missingSpells.Count == 0)
+        {
+            act = null;
+            return false;
+        }
+
+        if (StopIfMissingSpells)
+        {
+            act = null;
+            return true;
+        }
+
+        if (ActionHelper.TryGetAction(ActionID.MakeSpell(11385), out var waterCannon)
+            && waterCannon.IsUnlock
+            && waterCannon.IsReady)
+        {
+            act = waterCannon;
+            return true;
+        }
+
+        act = null;
+        return true;
+    }
+
+    protected override bool GeneralAbility(IAction nextGCD, out IAction? act)
+    {
+        if (ShouldStopForMissingSpells(out act))
+        {
+            return act != null;
+        }
+
+        return base.GeneralAbility(nextGCD, out act);
+    }
+
+    protected override bool GeneralGCD(out IAction? act)
+    {
+        if (ShouldStopForMissingSpells(out act))
+        {
+            return act != null;
+        }
+
+        return base.GeneralGCD(out act);
     }
 }
