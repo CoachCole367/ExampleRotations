@@ -41,16 +41,16 @@ public sealed class BLU_Basic : BlueMageRotation
 
     private static readonly IReadOnlyList<(ActionID Id, string Name)> SingleTargetRequiredActions = new List<(ActionID Id, string Name)>
     {
-        (ActionID.MakeSpell(11385), "Water Cannon"),
-        (ActionID.MakeSpell(11433), "Sonic Boom"),
-        (ActionID.MakeSpell(11430), "Moon Flute"),
+        (new ActionID(ActionType.Spell, 11385), "Water Cannon"),
+        (new ActionID(ActionType.Spell, 11433), "Sonic Boom"),
+        (new ActionID(ActionType.Spell, 11430), "Moon Flute"),
     };
 
     private static readonly IReadOnlyList<(ActionID Id, string Name)> AoeRequiredActions = new List<(ActionID Id, string Name)>
     {
-        (ActionID.MakeSpell(11385), "Water Cannon"),
-        (ActionID.MakeSpell(11404), "Flamethrower"),
-        (ActionID.MakeSpell(11418), "Surpanakha"),
+        (new ActionID(ActionType.Spell, 11385), "Water Cannon"),
+        (new ActionID(ActionType.Spell, 11404), "Flamethrower"),
+        (new ActionID(ActionType.Spell, 11418), "Surpanakha"),
     };
 
     private const float DefaultSpellRange = 25f;
@@ -58,29 +58,6 @@ public sealed class BLU_Basic : BlueMageRotation
 
     private IReadOnlyList<string> _missingSpells = Array.Empty<string>();
     private string _missingSpellStatus = "Missing spells: none";
-
-    #region Tracking Properties
-    public override void DisplayStatus()
-    {
-        RefreshMissingSpells();
-        var gatingActive = StopIfMissingSpells && _missingSpells.Count > 0;
-
-        ImGui.TextColored(ImGuiColors.DalamudViolet, "Blue Mage Rotation Tracking:");
-        ImGui.Text($"Profile: {Profile}");
-        ImGui.Text($"Use offensive oGCDs: {UseOffensiveOgcds}");
-        ImGui.Text($"Use defensive oGCDs: {UseDefensiveOgcds}");
-        ImGui.Text($"Stop if missing spells: {StopIfMissingSpells}");
-        ImGui.Text($"AoE target threshold: {AoeTargetThreshold}");
-
-        ImGui.TextColored(_missingSpells.Count > 0 ? ImGuiColors.DalamudRed : ImGuiColors.ParsedGreen, _missingSpellStatus);
-
-        ImGui.TextColored(gatingActive ? ImGuiColors.DalamudRed : ImGuiColors.ParsedGreen,
-            $"Gating active: {gatingActive}");
-
-        ImGui.TextColored(ImGuiColors.DalamudViolet, "Base Tracking:");
-        base.DisplayStatus();
-    }
-    #endregion
 
     private IReadOnlyList<(ActionID Id, string Name)> GetRequiredActionsForProfile()
     {
@@ -91,48 +68,42 @@ public sealed class BLU_Basic : BlueMageRotation
         };
     }
 
-    private bool HasSpell(ActionID id)
+    private bool HasSpell(ActionID id) => ActionManagerEx.TryGetAction(id, out var action) && action.IsUnlock;
+
+    protected override IBaseAction[] ActiveActions => GetRequiredActionsForProfile()
+        .Select(req => ActionManagerEx.TryGetAction(req.Id, out var action) ? action : null)
+        .OfType<IBaseAction>()
+        .ToArray();
+
+    private static bool IsValidCombatTarget(out IBattleChara? target)
     {
-        return ActionHelper.TryGetAction(id, out var action) && action.IsUnlock;
-    }
-
-    private static bool IsValidCombatTarget(out BattleChara? target)
-    {
-        target = Svc.Targets.Target as BattleChara;
-
-        if (target is null || !target.IsTargetable || target.IsDead)
-        {
-            return false;
-        }
-
-        if (!Svc.Condition[ConditionFlag.InCombat])
-        {
-            return false;
-        }
-
         var player = Svc.ClientState.LocalPlayer;
-        if (player is null)
+        if (player is null || !Svc.Condition[ConditionFlag.InCombat])
         {
+            target = null;
             return false;
         }
 
-        return Vector3.Distance(player.Position, target.Position) <= DefaultSpellRange;
+        target = Svc.Objects
+            .OfType<IBattleChara>()
+            .Where(enemy => enemy.ObjectKind == ObjectKind.BattleNpc
+                && enemy.IsTargetable
+                && !enemy.IsDead)
+            .OrderBy(enemy => Vector3.Distance(player.Position, enemy.Position))
+            .FirstOrDefault();
+
+        return target is not null && Vector3.Distance(player.Position, target.Position) <= DefaultSpellRange;
     }
 
-    private static int CountEnemiesInRange(GameObject center, float radius)
-    {
-        return Svc.Objects.Count(obj => obj is BattleChara enemy
-            && enemy.ObjectKind == ObjectKind.BattleNpc
-            && enemy is IBattleNpc battleNpc
-            && battleNpc.BattleNpcSubKind == BattleNpcSubKind.Enemy
-            && enemy.IsTargetable
-            && !enemy.IsDead
-            && Vector3.Distance(center.Position, enemy.Position) <= radius);
-    }
+    private static int CountEnemiesInRange(IBattleChara center, float radius) => Svc.Objects.Count(obj => obj is IBattleChara enemy
+        && enemy.ObjectKind == ObjectKind.BattleNpc
+        && enemy.IsTargetable
+        && !enemy.IsDead
+        && Vector3.Distance(center.Position, enemy.Position) <= radius);
 
     private static bool TryGetReadyAction(ActionID actionId, out IAction? action)
     {
-        if (ActionHelper.TryGetAction(actionId, out var candidate)
+        if (ActionManagerEx.TryGetAction(actionId, out var candidate)
             && candidate.IsUnlock
             && candidate.IsReady)
         {
@@ -144,7 +115,7 @@ public sealed class BLU_Basic : BlueMageRotation
         return false;
     }
 
-    private static bool TryGetReadySpell(ActionID actionId, BattleChara target, out IAction? action)
+    private static bool TryGetReadySpell(ActionID actionId, IBattleChara target, out IAction? action)
     {
         if (!TryGetReadyAction(actionId, out var candidate))
         {
@@ -204,7 +175,7 @@ public sealed class BLU_Basic : BlueMageRotation
             return true;
         }
 
-        if (ActionHelper.TryGetAction(ActionID.MakeSpell(11385), out var waterCannon)
+        if (ActionManagerEx.TryGetAction(new ActionID(ActionType.Spell, 11385), out var waterCannon)
             && waterCannon.IsUnlock
             && waterCannon.IsReady)
         {
@@ -231,7 +202,7 @@ public sealed class BLU_Basic : BlueMageRotation
 
         if (UseOffensiveOgcds && CanWeaveNow())
         {
-            if (TryGetReadyAction(ActionID.MakeSpell(11430), out act))
+            if (TryGetReadyAction(new ActionID(ActionType.Spell, 11430), out act))
             {
                 return true;
             }
@@ -239,7 +210,7 @@ public sealed class BLU_Basic : BlueMageRotation
 
         if (UseDefensiveOgcds && CanWeaveNow())
         {
-            if (TryGetReadyAction(ActionID.MakeSpell(11390), out act))
+            if (TryGetReadyAction(new ActionID(ActionType.Spell, 11390), out act))
             {
                 return true;
             }
@@ -265,23 +236,23 @@ public sealed class BLU_Basic : BlueMageRotation
 
         if (Profile == BluProfile.AoE_Basic && aoeTargetCount >= AoeTargetThreshold)
         {
-            if (TryGetReadySpell(ActionID.MakeSpell(11404), target, out act))
+            if (TryGetReadySpell(new ActionID(ActionType.Spell, 11404), target, out act))
             {
                 return true;
             }
 
-            if (TryGetReadySpell(ActionID.MakeSpell(11418), target, out act))
+            if (TryGetReadySpell(new ActionID(ActionType.Spell, 11418), target, out act))
             {
                 return true;
             }
         }
 
-        if (TryGetReadySpell(ActionID.MakeSpell(11433), target, out act))
+        if (TryGetReadySpell(new ActionID(ActionType.Spell, 11433), target, out act))
         {
             return true;
         }
 
-        if (TryGetReadySpell(ActionID.MakeSpell(11385), target, out act))
+        if (TryGetReadySpell(new ActionID(ActionType.Spell, 11385), target, out act))
         {
             return true;
         }
